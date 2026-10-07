@@ -1,0 +1,21 @@
+:root {
+  --bg: #FFF7EE; --ink: #3B3A4A; --body: #5B5A6B; --muted: #9A98A8; --line: #F0E6DA;
+  --card: #FFFFFF; --ok: #3DB48A; --ok-soft: #DDF4EA; --bad: #EF7A6A; --bad-soft: #FDE5E1;
+  --accent: #7C6CF2;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); }
+body { font-family: 'Noto Sans TC', system-ui, -apple-system, 'PingFang TC', 'Microsoft JhengHei', sans-serif; -webkit-font-smoothing: antialiased; }
+button { font-family: inherit; cursor: pointer; border: none; }
+input { font-family: inherit; }
+.num { font-family: 'Baloo 2', 'Noto Sans TC', sans-serif; }
+.card { background: var(--card); border-radius: 24px; box-shadow: 0 6px 24px rgba(120, 90, 60, .08); }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px; font-weight: 700; font-size: 14px; }
+.blob { position: fixed; border-radius: 50%; filter: blur(40px); opacity: .55; z-index: 0; pointer-events: none; }
+.wrap { position: relative; z-index: 1; }
+@keyframes pop { 0% { transform: scale(.6); opacity: 0 } 70% { transform: scale(1.08); opacity: 1 } 100% { transform: scale(1) } }
+@keyframes floaty { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-8px) } }
+@keyframes fall { 0% { transform: translateY(-10vh) rotate(0) } 100% { transform: translateY(110vh) rotate(540deg) } }
+.pop { animation: pop .45s ease-out both; }
+.floaty { animation: floaty 3s ease-in-out infinite; }
+.confetti { position: fixed; top: -20px; width: 12px; height: 18px; border-radius: 3px; z-index: 2; animation: fall linear infinite; pointer-events: none; }
