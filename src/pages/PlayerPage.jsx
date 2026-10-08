@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { push, set, get } from 'firebase/database'
 import { r } from '../firebase'
-import { QUESTIONS, GROUPS, OPTS, TIMER, levelOf, isTb, qsetOf, ansKeyOf } from '../data/questions'
-import { computeScores } from '../lib/score'
+import { QUESTIONS, GROUPS, OPTS, TIMER, levelOf, isTb, qsetOf, ansKeyOf, tbEligible } from '../data/questions'
+import { computeScores, awards } from '../lib/score'
 import { useQuiz, useCountdown } from '../lib/useQuiz'
 import { Blobs, Confetti, groupOf } from '../lib/ui'
 
@@ -31,10 +31,12 @@ export default function PlayerPage() {
   const rowAll = tb ? tbAnswers : answers
   const myAns = pid ? rowAll?.[qi]?.[pid] : null
   const tbGroups = game?.tbGroups || []
+  const tbPlayers = game?.tbPlayers || []
+  const hasTb = tbGroups.length + tbPlayers.length > 0
   const scores = useMemo(() => {
     const upto = tb ? QUESTIONS.length - 1 : game?.state === 'question' ? qi - 1 : qi
-    return computeScores(players, answers, upto, tbGroups.length ? { answers: tbAnswers, groups: tbGroups } : null)
-  }, [players, answers, tbAnswers, qi, game?.state, tb, tbGroups.join()])
+    return computeScores(players, answers, upto, hasTb ? { answers: tbAnswers, groups: tbGroups } : null)
+  }, [players, answers, tbAnswers, qi, game?.state, tb, tbGroups.join(), hasTb])
   const mine = scores.byPlayer[pid]
 
   async function join() {
@@ -144,12 +146,12 @@ export default function PlayerPage() {
   </>)
 
   // ── 加賽：非同分組只觀看 ──
-  if (tb && (state === 'question' || state === 'reveal') && !tbGroups.includes(me.group)) return shell(<>
+  if (tb && (state === 'question' || state === 'reveal') && !tbEligible(game, pid, me)) return shell(<>
     {header}
     <Center>
       <div className="floaty" style={{ fontSize: 60 }}>⚔️</div>
       <div style={{ fontSize: 22, fontWeight: 900, marginTop: 8 }}>加賽進行中</div>
-      <div style={{ color: 'var(--body)', marginTop: 8 }}>{tbGroups.map((id) => groupOf(id).name).join(' vs ')}</div>
+      <div style={{ color: 'var(--body)', marginTop: 8 }}>{[tbGroups.length ? `團體：${tbGroups.map((id) => groupOf(id).name).join(' vs ')}` : '', tbPlayers.length ? `個人：${tbPlayers.length} 人爭前三` : ''].filter(Boolean).join('｜')}</div>
       <div style={{ color: 'var(--body)', marginTop: 4 }}>請看大螢幕幫忙加油 📣</div>
     </Center>
   </>)
@@ -242,6 +244,10 @@ export default function PlayerPage() {
   if (state === 'final') {
     const lv = levelOf(mine?.score ?? 0)
     const gr = scores.groups.find((x) => x.id === me.group)
+    const aw = awards(scores, !!game.tbDone)
+    const iWin = aw.indiv.some((p) => p.pid === pid)
+    const gWin = aw.groupWinner?.id === me.group
+    const pending = !game.tbDone && aw.needTb && (aw.contenders.some((p) => p.pid === pid) || aw.topGroups.some((x) => x.id === me.group) && aw.needGroupTb)
     return shell(<>
       <Confetti n={24} />
       {header}
@@ -252,6 +258,11 @@ export default function PlayerPage() {
         <div className="pill" style={{ background: g.soft, marginTop: 8, fontSize: 16 }}>{lv.t}</div>
         <div style={{ marginTop: 16, color: 'var(--body)' }}>答對 {mine?.correct ?? 0} 題・個人第 {mine?.rank ?? '-'} 名（共 {scores.ranking.length} 人）</div>
       </div>
+      {(iWin || gWin || pending) && <div className="card pop" style={{ padding: 16, marginTop: 14, textAlign: 'center', background: '#FFF6DA', fontWeight: 900, fontSize: 18, lineHeight: 1.7 }}>
+        {iWin && <div>⭐ 個人賽前三名！</div>}
+        {gWin && <div>👑 {g.name} 團體賽冠軍！</div>}
+        {pending && <div style={{ color: '#C0583F' }}>⚔️ 同分，準備加賽！</div>}
+      </div>}
       {gr && <div className="card" style={{ padding: 18, marginTop: 14, textAlign: 'center', background: g.soft }}>
         <div style={{ fontWeight: 800 }}>{g.emoji} {g.name} 平均 <span className="num" style={{ fontSize: 26 }}>{gr.avg}</span> 分</div>
         <div style={{ color: 'var(--body)', marginTop: 4 }}>小組排名第 {gr.rank} 名{gr.inTb && game.tbDone ? `（加賽平均 ${gr.tbAvg}）` : ''}</div>

@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react'
 import { set, remove, serverTimestamp } from 'firebase/database'
 import { r, HOST_PIN } from '../firebase'
-import { QUESTIONS, TIEBREAK, GROUPS, OPTS, TIMER, isTb, qsetOf } from '../data/questions'
-import { computeScores, distribution, tiedSets } from '../lib/score'
+import { QUESTIONS, TIEBREAK, GROUPS, OPTS, TIMER, isTb, qsetOf, tbEligible } from '../data/questions'
+import { computeScores, distribution, awards } from '../lib/score'
 import { useQuiz, useCountdown } from '../lib/useQuiz'
 
 const LS = 'ccl-quiz-host'
@@ -33,7 +33,6 @@ export default function HostPage() {
 
 function Console() {
   const { game, players, answers, tbAnswers, offset } = useQuiz()
-  const [pick, setPick] = useState(null)
   const left = useCountdown(game, offset)
   const [tab, setTab] = useState('control')
   const state = game?.state ?? 'waiting'
@@ -42,26 +41,30 @@ function Console() {
   const QS = qsetOf(game)
   const q = QS[qi]
   const tbGroups = game?.tbGroups || []
+  const tbPlayers = game?.tbPlayers || []
+  const hasTb = tbGroups.length + tbPlayers.length > 0
   const allP = Object.entries(players || {}).filter(([, p]) => p)
-  const plist = tb ? allP.filter(([, p]) => tbGroups.includes(p.group)) : allP
+  const plist = tb ? allP.filter(([id, p]) => tbEligible(game, id, p)) : allP
   const curAns = tb ? tbAnswers : answers
   const row = curAns?.[qi] || {}
   const scores = useMemo(() => computeScores(players, answers, QUESTIONS.length - 1,
-    tbGroups.length ? { answers: tbAnswers, groups: tbGroups } : null), [players, answers, tbAnswers, tbGroups.join()])
+    hasTb ? { answers: tbAnswers, groups: tbGroups } : null), [players, answers, tbAnswers, tbGroups.join(), hasTb])
   const base = useMemo(() => computeScores(players, answers), [players, answers])
-  const ties = tiedSets(base.groups)
+  const aw = awards(base)
+  const awFinal = awards(scores, !!game?.tbDone)
   const isLast = qi >= QS.length - 1
 
   const setGame = (g) => set(r('game'), g)
   const startQ = (i) => setGame({ state: 'question', currentQ: i, startTime: serverTimestamp(), mode: 'main' })
-  const startTb = (i, groups) => setGame({ state: 'question', currentQ: i, startTime: serverTimestamp(), mode: 'tb', tbGroups: groups })
+  const startTb = (i, groups, pids) => setGame({ state: 'question', currentQ: i, startTime: serverTimestamp(), mode: 'tb', tbGroups: groups, tbPlayers: pids })
   async function beginTb() {
-    const gs = pick || ties[0]?.map((g) => g.id) || []
-    if (gs.length < 2) return alert('請至少勾選兩組')
-    if (!confirm(`開始加賽：${gs.map((id) => GROUPS.find((g) => g.id === id).name).join(' vs ')}？`)) return
-    await remove(r('tbAnswers')); await startTb(0, gs)
+    const gs = aw.needGroupTb ? aw.topGroups.map((g) => g.id) : []
+    const ps = aw.needIndivTb ? aw.contenders.map((p) => p.pid) : []
+    if (!gs.length && !ps.length) return alert('目前不需要加賽')
+    if (!confirm('開始 3 題加賽？')) return
+    await remove(r('tbAnswers')); await startTb(0, gs, ps)
   }
-  const finishTb = () => setGame({ state: 'final', currentQ: QUESTIONS.length - 1, mode: 'main', tbGroups, tbDone: true })
+  const finishTb = () => setGame({ state: 'final', currentQ: QUESTIONS.length - 1, mode: 'main', tbGroups, tbPlayers, tbDone: true })
   const reveal = () => setGame({ ...game, state: 'reveal' })
   const board = () => setGame({ ...game, state: 'leaderboard' })
   const final = () => setGame({ ...game, state: 'final' })
@@ -91,7 +94,7 @@ function Console() {
   // 下一步主按鈕
   let main = null
   if (tb && state === 'question') main = { t: left > 0 ? `📣 提前公布答案（剩 ${Math.ceil(left)} 秒）` : '📣 公布答案', f: reveal, c: left > 0 ? '#F2B632' : 'var(--ok)' }
-  else if (tb && state === 'reveal') main = isLast ? { t: '🏆 公布加賽後最終成績', f: finishTb, c: 'var(--accent)' } : { t: `⚔️ 加賽下一題（第 ${qi + 2} 題）`, f: () => startTb(qi + 1, tbGroups), c: '#EF7A6A' }
+  else if (tb && state === 'reveal') main = isLast ? { t: '🏆 公布加賽後最終成績', f: finishTb, c: 'var(--accent)' } : { t: `⚔️ 加賽下一題（第 ${qi + 2} 題）`, f: () => startTb(qi + 1, tbGroups, tbPlayers), c: '#EF7A6A' }
   else if (state === 'waiting') main = { t: `▶ 開始第 1 題（${plist.length} 人）`, f: () => startQ(0), c: 'var(--ok)' }
   else if (state === 'question') main = { t: left > 0 ? `📣 提前公布答案（剩 ${Math.ceil(left)} 秒）` : '📣 公布答案', f: reveal, c: left > 0 ? '#F2B632' : 'var(--ok)' }
   else if (state === 'reveal' && STAGES.includes(qi)) main = { t: `📊 公布${qi === 2 ? '第一' : '第二'}階段排名（個人＋團體）`, f: board, c: 'var(--accent)' }
@@ -119,22 +122,18 @@ function Console() {
         {main && <button onClick={main.f} style={{ width: '100%', padding: '20px 16px', borderRadius: 20, background: main.c, color: '#fff', fontWeight: 900, fontSize: 20, boxShadow: '0 6px 18px rgba(0,0,0,.12)' }}>{main.t}</button>}
         {(state === 'reveal' && !tb && !STAGES.includes(qi) && !isLast) && <button onClick={board} style={{ width: '100%', marginTop: 10, padding: 14, borderRadius: 16, background: '#fff', fontWeight: 800, fontSize: 16 }}>📊 大螢幕顯示小組排行</button>}
         {state === 'final' && <div className="card" style={{ padding: 16, textAlign: 'center', fontWeight: 800 }}>測驗結束 🎉 可到「個人成績」匯出 CSV</div>}
-        {state === 'final' && !game.tbDone && (
-          <div className="card" style={{ padding: 16, marginTop: 12, background: ties.length ? '#FFF1EE' : '#fff' }}>
-            <div style={{ fontWeight: 900, marginBottom: 6 }}>⚔️ 加賽（3 題）</div>
-            <div style={{ color: 'var(--body)', fontSize: 14, marginBottom: 10 }}>
-              {ties.length ? `偵測到同分：${ties.map((t) => t.map((g) => `${g.name} ${g.avg}`).join(' = ')).join('；')}` : '目前沒有同分組別；如需加賽仍可手動勾選'}
+        {state === 'final' && (
+          <div className="card" style={{ padding: 16, marginTop: 12, background: !game.tbDone && aw.needTb ? '#FFF1EE' : '#fff' }}>
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>🎁 得獎名單</div>
+            <div style={{ fontSize: 15, lineHeight: 1.7 }}>
+              <div>👑 團體賽冠軍：{awFinal.groupWinner ? <b>{awFinal.groupWinner.name}（平均 {awFinal.groupWinner.avg}）</b>
+                : <span style={{ color: 'var(--bad)' }}>同分 {aw.topGroups.map((g) => g.name).join('、')}（{aw.topGroups[0]?.avg}）→ 需加賽</span>}</div>
+              <div>⭐ 個人賽前三：{awFinal.indiv.map((p) => `${p.name}（${p.score}）`).join('、') || '—'}</div>
+              {aw.needIndivTb && !game.tbDone && <div style={{ color: 'var(--bad)' }}>
+                {aw.cutoff} 分同分 {aw.contenders.length} 人爭 {aw.slots} 個名額：{aw.contenders.map((p) => p.name).join('、')} → 需加賽</div>}
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-              {base.groups.filter((g) => g.count > 0).map((g) => {
-                const sel = (pick || ties[0]?.map((x) => x.id) || []).includes(g.id)
-                return <button key={g.id} className="pill" onClick={() => {
-                  const cur = pick || ties[0]?.map((x) => x.id) || []
-                  setPick(cur.includes(g.id) ? cur.filter((x) => x !== g.id) : [...cur, g.id])
-                }} style={{ background: sel ? g.color : g.soft, color: sel ? '#fff' : 'var(--ink)' }}>{sel ? '✓ ' : ''}{g.name} {g.avg}</button>
-              })}
-            </div>
-            <button onClick={beginTb} style={{ width: '100%', padding: 14, borderRadius: 14, background: '#EF7A6A', color: '#fff', fontWeight: 900, fontSize: 17 }}>⚔️ 開始加賽</button>
+            {!game.tbDone && aw.needTb && <button onClick={beginTb} style={{ width: '100%', marginTop: 12, padding: 14, borderRadius: 14, background: '#EF7A6A', color: '#fff', fontWeight: 900, fontSize: 17 }}>⚔️ 開始加賽（3 題）</button>}
+            {!aw.needTb && <div style={{ color: 'var(--ok)', fontWeight: 700, marginTop: 6 }}>✓ 不需要加賽</div>}
           </div>
         )}
 
@@ -154,7 +153,7 @@ function Console() {
 
         <div className="card" style={{ padding: 16, marginTop: 14 }}>
           <div style={{ fontWeight: 800, marginBottom: 10 }}>本題作答：{Object.keys(row).length} / {plist.length}</div>
-          {GROUPS.filter((g) => !tb || tbGroups.includes(g.id)).map((g) => {
+          {GROUPS.filter((g) => !tb || plist.some(([, p]) => p.group === g.id)).map((g) => {
             const m = plist.filter(([, p]) => p.group === g.id)
             return (
               <div key={g.id} style={{ marginBottom: 10 }}>

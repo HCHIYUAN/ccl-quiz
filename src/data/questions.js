@@ -72,3 +72,5 @@ export function levelOf(score) {
 export const isTb = (game) => game?.mode === 'tb'
 export const qsetOf = (game) => (isTb(game) ? TIEBREAK : QUESTIONS)
 export const ansKeyOf = (game) => (isTb(game) ? 'tbAnswers' : 'answers')
+export const tbEligible = (game, pid, player) =>
+  (game?.tbGroups || []).includes(player?.group) || (game?.tbPlayers || []).includes(pid)

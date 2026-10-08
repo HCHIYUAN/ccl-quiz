@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { QUESTIONS, GROUPS, OPTS, TIMER, levelOf, isTb, qsetOf } from '../data/questions'
-import { computeScores, distribution, tiedSets } from '../lib/score'
+import { QUESTIONS, GROUPS, OPTS, TIMER, levelOf, isTb, qsetOf, tbEligible } from '../data/questions'
+import { computeScores, distribution, awards } from '../lib/score'
 import { useQuiz, useCountdown } from '../lib/useQuiz'
 import { Blobs, Confetti, TimerRing } from '../lib/ui'
 
@@ -20,17 +20,19 @@ export default function BoardPage() {
   const q = QS[qi]
   const state = game?.state ?? 'waiting'
   const tbGroups = game?.tbGroups || []
+  const tbPlayers = game?.tbPlayers || []
+  const hasTb = tbGroups.length + tbPlayers.length > 0
   const allPlayers = Object.entries(players || {}).filter(([, p]) => p)
-  const plist = tb ? allPlayers.filter(([, p]) => tbGroups.includes(p.group)) : allPlayers
+  const plist = tb ? allPlayers.filter(([id, p]) => tbEligible(game, id, p)) : allPlayers
   const pCount = plist.length
   const curAns = tb ? tbAnswers : answers
   const row = curAns?.[qi] || {}
   const aCount = Object.keys(row).length
   const scores = useMemo(() => computeScores(players, answers,
     tb ? QUESTIONS.length - 1 : state === 'question' ? qi - 1 : qi,
-    tbGroups.length ? { answers: tbAnswers, groups: tbGroups, upto: tb && state === 'question' ? qi - 1 : qi } : null),
-  [players, answers, tbAnswers, qi, state, tb, tbGroups.join()])
-  const tbTitle = tbGroups.map((id) => GROUPS.find((g) => g.id === id)?.name).join(' vs ')
+    hasTb ? { answers: tbAnswers, groups: tbGroups, upto: tb && state === 'question' ? qi - 1 : qi } : null),
+  [players, answers, tbAnswers, qi, state, tb, tbGroups.join(), hasTb])
+  const tbTitle = [tbGroups.length ? `團體 ${tbGroups.map((id) => GROUPS.find((g) => g.id === id)?.name).join(' vs ')}` : '', tbPlayers.length ? `個人 ${tbPlayers.length} 人爭前三` : ''].filter(Boolean).join('＋')
 
   const page = (children) => (
     <div style={{ minHeight: '100vh', overflow: 'hidden', position: 'relative' }}>
@@ -84,7 +86,8 @@ export default function BoardPage() {
     </div>
   )
 
-  const shownGroups = GROUPS.filter((g) => !tb || tbGroups.includes(g.id))
+  const shownGroups = tb ? GROUPS.filter((g) => tbGroups.includes(g.id)) : GROUPS
+  const tbIndiv = tb ? allPlayers.filter(([id]) => tbPlayers.includes(id)) : []
 
   // ── 作答中：左 2/3 題目，右 1/3 各組作答進度 ──
   if (state === 'question' && q) return page(
@@ -128,6 +131,10 @@ export default function BoardPage() {
             </div>
           )
         })}
+        {tbIndiv.length > 0 && <div className="card" style={{ padding: '1.6vh 1.2vw', background: '#FFF6DA' }}>
+          <div style={{ fontWeight: 800, fontSize: 'clamp(15px,1.25vw,24px)', marginBottom: 6 }}>⭐ 個人加賽</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{tbIndiv.map(([id, p]) => <span key={id} className="pill" style={{ background: row[id] ? '#fff' : '#F3EEE8', fontSize: 'clamp(12px,1vw,18px)', opacity: row[id] ? 1 : .6 }}>{p.name}{row[id] ? ' ✓' : ''}</span>)}</div>
+        </div>}
       </div>
       {left <= 0 && <div className="pop" style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(255,247,238,.6)', zIndex: 5 }}>
         <div className="card" style={{ padding: '4vh 5vw', fontSize: 'clamp(32px,4vw,72px)', fontWeight: 900 }}>⌛ 時間到！</div>
@@ -178,6 +185,11 @@ export default function BoardPage() {
               </div>
             )
           })}
+          {tbIndiv.length > 0 && <div className="card" style={{ padding: '1.6vh 1.2vw', background: '#FFF6DA' }}>
+            <div style={{ fontWeight: 800, fontSize: 'clamp(15px,1.25vw,24px)', marginBottom: 6 }}>⭐ 個人加賽累計</div>
+            {tbIndiv.map(([id, p]) => <div key={id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'clamp(13px,1.1vw,20px)', fontWeight: 700 }}>
+              <span>{p.name}</span><span className="num">{scores.byPlayer[id]?.tb ?? 0}</span></div>)}
+          </div>}
         </div>
       </div>
     )
@@ -198,52 +210,60 @@ export default function BoardPage() {
     </div>
   )
 
-  // ── 最終結果 ──
+  // ── 最終結果：團體賽冠軍＋個人賽前三 ──
   if (state === 'final') {
+    const aw = awards(scores, !!game.tbDone)
     const gs = scores.groups.filter((g) => g.count > 0)
     const hist = Array(11).fill(0)
     scores.ranking.forEach((p) => { hist[Math.round(p.score / 10)] += 1 })
     const hmax = Math.max(1, ...hist)
-    const avgAll = scores.ranking.length ? Math.round(scores.ranking.reduce((s, p) => s + p.score, 0) / scores.ranking.length) : 0
-    const order = [1, 0, 2, 3]
+    const avgAll = scores.ranking.length ? Math.round(scores.ranking.reduce((s2, p) => s2 + p.score, 0) / scores.ranking.length) : 0
+    const W = aw.groupWinner
+    const winIds = new Set(aw.indiv.map((p) => p.pid))
     return page(<>
       <Confetti n={44} />
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1.25fr 1fr', gap: '3vw' }}>
-        <div>
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '3vw' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2.2vh' }}>
           <div style={{ fontSize: 'clamp(30px,3.2vw,58px)', fontWeight: 900 }}>🏆 最終成績</div>
-          {!game.tbDone && tiedSets(scores.groups).length > 0 && <div className="pill" style={{ background: '#FDE5E1', marginTop: 8, fontSize: 'clamp(13px,1.1vw,20px)' }}>⚔️ 有同分組別，準備加賽：{tiedSets(scores.groups).map((t) => t.map((g) => g.name).join(' vs ')).join('；')}</div>}
-          {game.tbDone && <div className="pill" style={{ background: '#FDE5E1', marginTop: 8, fontSize: 'clamp(13px,1.1vw,20px)' }}>⚔️ 同分組別已由加賽決定名次：{scores.groups.filter((g) => g.inTb).map((g) => `${g.name} ${g.tbAvg}`).join('｜')}</div>}
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '1.4vw', height: '42vh', marginTop: '3vh' }}>
-            {order.map((k) => gs[k]).filter(Boolean).map((g) => {
-              const h = [100, 78, 60, 46][g.rank - 1]
-              return (
-                <div key={g.id} className="pop" style={{ flex: 1, textAlign: 'center' }}>
-                  <div style={{ fontSize: 'clamp(26px,2.6vw,48px)' }}>{['🥇', '🥈', '🥉', '🎖️'][g.rank - 1]}</div>
-                  <div style={{ fontWeight: 800, fontSize: 'clamp(15px,1.3vw,24px)' }}>{g.emoji} {g.name}</div>
-                  <div style={{ height: `${h * 0.32}vh`, background: g.color, borderRadius: '20px 20px 8px 8px', marginTop: 8, display: 'grid', placeItems: 'center', color: '#fff' }}>
-                    <div><div className="num" style={{ fontSize: 'clamp(28px,3vw,56px)', fontWeight: 800, lineHeight: 1 }}>{g.avg}</div>
-                      <div style={{ fontSize: 'clamp(12px,0.95vw,18px)' }}>平均・{g.count} 人</div></div>
-                  </div>
-                </div>
-              )
-            })}
+          <div className="card pop" style={{ padding: '3vh 2vw', background: W ? W.soft : '#FFF1EE', border: `4px solid ${W ? W.color : '#EF7A6A'}`, textAlign: 'center' }}>
+            <div style={{ fontWeight: 900, fontSize: 'clamp(18px,1.6vw,30px)', color: 'var(--body)' }}>👑 團體賽冠軍</div>
+            {W ? <>
+              <div style={{ fontSize: 'clamp(40px,4.4vw,84px)', fontWeight: 900, lineHeight: 1.2 }}>{W.emoji} {W.name}</div>
+              <div style={{ fontSize: 'clamp(16px,1.4vw,26px)', color: 'var(--body)' }}>平均 <span className="num" style={{ fontSize: '1.5em', color: 'var(--ink)' }}>{W.avg}</span> 分・{W.count} 人{game.tbDone && aw.needGroupTb ? `・加賽平均 ${W.tbAvg}` : ''}</div>
+            </> : <div style={{ fontSize: 'clamp(28px,3vw,56px)', fontWeight: 900, color: '#C0583F', margin: '1vh 0' }}>⚔️ 同分加賽：{aw.topGroups.map((g) => g.name).join(' vs ')}</div>}
           </div>
-          <div className="card" style={{ marginTop: '3vh', padding: '2vh 1.6vw' }}>
+          <GroupBars groups={gs} compact />
+          <div className="card" style={{ padding: '1.8vh 1.6vw' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 'clamp(14px,1.2vw,22px)' }}>
               <span>全體分數分布</span><span>全體平均 <span className="num">{avgAll}</span> 分</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: '12vh', marginTop: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: '10vh', marginTop: 8 }}>
               {hist.map((n, i) => (
                 <div key={i} style={{ flex: 1, textAlign: 'center' }}>
                   <div className="num" style={{ fontSize: 14, color: 'var(--body)' }}>{n || ''}</div>
-                  <div style={{ height: `${(n / hmax) * 8}vh`, background: i >= 9 ? '#A98BEF' : i >= 7 ? '#4FC3A1' : i >= 4 ? '#6BAEF0' : '#FFB38A', borderRadius: 6 }} />
+                  <div style={{ height: `${(n / hmax) * 6.5}vh`, background: i >= 9 ? '#A98BEF' : i >= 7 ? '#4FC3A1' : i >= 4 ? '#6BAEF0' : '#FFB38A', borderRadius: 6 }} />
                   <div className="num" style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{i * 10}</div>
                 </div>
               ))}
             </div>
           </div>
         </div>
-        <TopList ranking={scores.ranking} n={10} title="個人前 10 名" showLevel />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2.2vh' }}>
+          <div className="card pop" style={{ padding: '2.6vh 1.6vw', background: '#FFF6DA' }}>
+            <div style={{ fontWeight: 900, fontSize: 'clamp(18px,1.6vw,30px)', marginBottom: '1.4vh' }}>⭐ 個人賽前三名</div>
+            {aw.indiv.map((p) => {
+              const g = GROUPS.find((x) => x.id === p.group)
+              return <div key={p.pid} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1.1vh 1vw', marginBottom: 6, borderRadius: 16, background: '#fff' }}>
+                <span style={{ fontSize: 'clamp(22px,2vw,38px)' }}>🎁</span>
+                <span style={{ flex: 1, fontWeight: 900, fontSize: 'clamp(20px,1.9vw,36px)' }}>{p.name} <span style={{ fontSize: '0.55em', color: 'var(--body)' }}>{g?.emoji} {g?.name}</span></span>
+                <span className="num" style={{ fontWeight: 800, fontSize: 'clamp(22px,2vw,38px)' }}>{p.score}</span>
+              </div>
+            })}
+            {aw.needIndivTb && !game.tbDone && <div style={{ marginTop: 8, padding: '1.2vh 1vw', borderRadius: 14, background: '#FFE7E1', fontWeight: 800, fontSize: 'clamp(15px,1.3vw,24px)' }}>
+              ⚔️ {aw.cutoff} 分同分 {aw.contenders.length} 人，爭 {aw.slots} 個名額：{aw.contenders.map((p) => p.name).join('、')}</div>}
+          </div>
+          <TopList ranking={scores.ranking.filter((p) => !winIds.has(p.pid))} n={7} title="其他高分" showLevel start={aw.indiv.length} />
+        </div>
       </div>
     </>)
   }
@@ -270,15 +290,15 @@ function GroupBars({ groups, compact, max = 100, ranked }) {
   )
 }
 
-function TopList({ ranking, n, title, showLevel }) {
+function TopList({ ranking, n, title, showLevel, start = 0 }) {
   return (
-    <div className="card" style={{ padding: '2.4vh 1.6vw', alignSelf: 'start' }}>
+    <div className="card" style={{ padding: '2.4vh 1.6vw', alignSelf: 'stretch' }}>
       <div style={{ fontWeight: 900, fontSize: 'clamp(16px,1.5vw,28px)', marginBottom: '1.4vh' }}>⭐ {title}</div>
       {ranking.slice(0, n).map((p, i) => {
         const g = GROUPS.find((x) => x.id === p.group)
         return (
-          <div key={p.pid} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1vh 0.6vw', borderRadius: 14, background: i < 3 ? g?.soft : 'transparent', marginBottom: 4 }}>
-            <span className="num" style={{ width: 34, fontWeight: 800, fontSize: 'clamp(16px,1.4vw,26px)', color: 'var(--muted)' }}>{i + 1}</span>
+          <div key={p.pid} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1vh 0.6vw', borderRadius: 14, background: i < 3 && !start ? g?.soft : 'transparent', marginBottom: 4 }}>
+            <span className="num" style={{ width: 34, fontWeight: 800, fontSize: 'clamp(16px,1.4vw,26px)', color: 'var(--muted)' }}>{p.rank}</span>
             <span style={{ flex: 1, fontWeight: 800, fontSize: 'clamp(15px,1.3vw,24px)' }}>{p.name} <span style={{ fontSize: '0.75em', color: 'var(--muted)' }}>{g?.emoji}</span></span>
             {showLevel && <span style={{ color: 'var(--body)', fontSize: 'clamp(12px,1vw,18px)' }}>{levelOf(p.score).t}</span>}
             <span className="num" style={{ fontWeight: 800, fontSize: 'clamp(18px,1.5vw,28px)' }}>{p.score}</span>
