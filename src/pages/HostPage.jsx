@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react'
 import { set, remove, serverTimestamp } from 'firebase/database'
 import { r, HOST_PIN } from '../firebase'
-import { QUESTIONS, GROUPS, OPTS, TIMER } from '../data/questions'
-import { computeScores, distribution } from '../lib/score'
+import { QUESTIONS, TIEBREAK, GROUPS, OPTS, TIMER, isTb, qsetOf } from '../data/questions'
+import { computeScores, distribution, tiedSets } from '../lib/score'
 import { useQuiz, useCountdown } from '../lib/useQuiz'
 
 const LS = 'ccl-quiz-host'
@@ -31,39 +31,56 @@ export default function HostPage() {
 }
 
 function Console() {
-  const { game, players, answers, offset } = useQuiz()
+  const { game, players, answers, tbAnswers, offset } = useQuiz()
+  const [pick, setPick] = useState(null)
   const left = useCountdown(game, offset)
   const [tab, setTab] = useState('control')
   const state = game?.state ?? 'waiting'
   const qi = game?.currentQ ?? 0
-  const q = QUESTIONS[qi]
-  const plist = Object.entries(players || {}).filter(([, p]) => p)
-  const row = answers?.[qi] || {}
-  const scores = useMemo(() => computeScores(players, answers), [players, answers])
-  const isLast = qi >= QUESTIONS.length - 1
+  const tb = isTb(game)
+  const QS = qsetOf(game)
+  const q = QS[qi]
+  const tbGroups = game?.tbGroups || []
+  const allP = Object.entries(players || {}).filter(([, p]) => p)
+  const plist = tb ? allP.filter(([, p]) => tbGroups.includes(p.group)) : allP
+  const curAns = tb ? tbAnswers : answers
+  const row = curAns?.[qi] || {}
+  const scores = useMemo(() => computeScores(players, answers, QUESTIONS.length - 1,
+    tbGroups.length ? { answers: tbAnswers, groups: tbGroups } : null), [players, answers, tbAnswers, tbGroups.join()])
+  const base = useMemo(() => computeScores(players, answers), [players, answers])
+  const ties = tiedSets(base.groups)
+  const isLast = qi >= QS.length - 1
 
   const setGame = (g) => set(r('game'), g)
-  const startQ = (i) => setGame({ state: 'question', currentQ: i, startTime: serverTimestamp() })
+  const startQ = (i) => setGame({ state: 'question', currentQ: i, startTime: serverTimestamp(), mode: 'main' })
+  const startTb = (i, groups) => setGame({ state: 'question', currentQ: i, startTime: serverTimestamp(), mode: 'tb', tbGroups: groups })
+  async function beginTb() {
+    const gs = pick || ties[0]?.map((g) => g.id) || []
+    if (gs.length < 2) return alert('請至少勾選兩組')
+    if (!confirm(`開始加賽：${gs.map((id) => GROUPS.find((g) => g.id === id).name).join(' vs ')}？`)) return
+    await remove(r('tbAnswers')); await startTb(0, gs)
+  }
+  const finishTb = () => setGame({ state: 'final', currentQ: QUESTIONS.length - 1, mode: 'main', tbGroups, tbDone: true })
   const reveal = () => setGame({ ...game, state: 'reveal' })
   const board = () => setGame({ ...game, state: 'leaderboard' })
   const final = () => setGame({ ...game, state: 'final' })
   async function reset() {
     if (!confirm('確定重置？所有玩家與作答紀錄都會清除。')) return
-    await remove(r('answers')); await remove(r('players'))
+    await remove(r('answers')); await remove(r('tbAnswers')); await remove(r('players'))
     await setGame({ state: 'waiting', currentQ: 0 })
   }
   async function resetAnswersOnly() {
     if (!confirm('保留已加入的玩家，只清除作答並回到等待畫面？')) return
-    await remove(r('answers')); await setGame({ state: 'waiting', currentQ: 0 })
+    await remove(r('answers')); await remove(r('tbAnswers')); await setGame({ state: 'waiting', currentQ: 0 })
   }
   const kick = (id, name) => confirm(`移除「${name}」？`) && remove(r(`players/${id}`))
 
   function exportCsv() {
     const head = ['排名', '姓名', '組別', '總分', '答對題數', ...QUESTIONS.map((_, i) => `Q${i + 1}`)]
-    const lines = scores.ranking.map((p) => [p.rank, p.name, `第${p.group}組`, p.score, p.correct,
+    const lines = scores.ranking.map((p) => [p.rank, p.name, GROUPS.find((x) => x.id === p.group)?.name, p.score, p.correct,
       ...QUESTIONS.map((qq, i) => { const a = answers?.[i]?.[p.pid]; return a ? (a.choice === qq.ans ? 'O' : OPTS[a.choice].label) : '-' })])
-    const g = ['', '小組', '人數', '平均']
-    const glines = scores.groups.map((x) => ['', x.name, x.count, x.avg])
+    const g = ['名次', '小組', '人數', '平均', '加賽平均']
+    const glines = scores.groups.map((x) => [x.rank, x.name, x.count, x.avg, x.tbAvg ?? ''])
     const csv = '﻿' + [head, ...lines, [], g, ...glines].map((l) => l.join(',')).join('\n')
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
@@ -72,13 +89,15 @@ function Console() {
 
   // 下一步主按鈕
   let main = null
-  if (state === 'waiting') main = { t: `▶ 開始第 1 題（${plist.length} 人）`, f: () => startQ(0), c: 'var(--ok)' }
+  if (tb && state === 'question') main = { t: left > 0 ? `📣 提前公布答案（剩 ${Math.ceil(left)} 秒）` : '📣 公布答案', f: reveal, c: left > 0 ? '#F2B632' : 'var(--ok)' }
+  else if (tb && state === 'reveal') main = isLast ? { t: '🏆 公布加賽後最終成績', f: finishTb, c: 'var(--accent)' } : { t: `⚔️ 加賽下一題（第 ${qi + 2} 題）`, f: () => startTb(qi + 1, tbGroups), c: '#EF7A6A' }
+  else if (state === 'waiting') main = { t: `▶ 開始第 1 題（${plist.length} 人）`, f: () => startQ(0), c: 'var(--ok)' }
   else if (state === 'question') main = { t: left > 0 ? `📣 提前公布答案（剩 ${Math.ceil(left)} 秒）` : '📣 公布答案', f: reveal, c: left > 0 ? '#F2B632' : 'var(--ok)' }
   else if (state === 'reveal') main = isLast ? { t: '🏆 公布最終成績', f: final, c: 'var(--accent)' } : { t: `▶ 下一題（第 ${qi + 2} 題）`, f: () => startQ(qi + 1), c: 'var(--ok)' }
   else if (state === 'leaderboard') main = isLast ? { t: '🏆 公布最終成績', f: final, c: 'var(--accent)' } : { t: `▶ 下一題（第 ${qi + 2} 題）`, f: () => startQ(qi + 1), c: 'var(--ok)' }
 
-  const label = { waiting: '⏳ 等待加入', question: `🟢 第 ${qi + 1} 題作答中`, reveal: `📣 第 ${qi + 1} 題已公布`, leaderboard: `📊 第 ${qi + 1} 題後排行`, final: '🏆 最終成績' }[state]
-  const d = distribution(answers, qi)
+  const label = tb ? `⚔️ 加賽第 ${qi + 1} 題${state === 'question' ? '作答中' : '已公布'}` : { waiting: '⏳ 等待加入', question: `🟢 第 ${qi + 1} 題作答中`, reveal: `📣 第 ${qi + 1} 題已公布`, leaderboard: `📊 第 ${qi + 1} 題後排行`, final: '🏆 最終成績' }[state]
+  const d = distribution(curAns, qi)
 
   return (
     <div style={{ maxWidth: 760, margin: '0 auto', padding: '16px 14px 40px' }}>
@@ -96,12 +115,30 @@ function Console() {
 
       {tab === 'control' && <>
         {main && <button onClick={main.f} style={{ width: '100%', padding: '20px 16px', borderRadius: 20, background: main.c, color: '#fff', fontWeight: 900, fontSize: 20, boxShadow: '0 6px 18px rgba(0,0,0,.12)' }}>{main.t}</button>}
-        {(state === 'reveal') && <button onClick={board} style={{ width: '100%', marginTop: 10, padding: 14, borderRadius: 16, background: '#fff', fontWeight: 800, fontSize: 16 }}>📊 大螢幕顯示小組排行</button>}
+        {(state === 'reveal' && !tb) && <button onClick={board} style={{ width: '100%', marginTop: 10, padding: 14, borderRadius: 16, background: '#fff', fontWeight: 800, fontSize: 16 }}>📊 大螢幕顯示小組排行</button>}
         {state === 'final' && <div className="card" style={{ padding: 16, textAlign: 'center', fontWeight: 800 }}>測驗結束 🎉 可到「個人成績」匯出 CSV</div>}
+        {state === 'final' && !game.tbDone && (
+          <div className="card" style={{ padding: 16, marginTop: 12, background: ties.length ? '#FFF1EE' : '#fff' }}>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>⚔️ 加賽（3 題）</div>
+            <div style={{ color: 'var(--body)', fontSize: 14, marginBottom: 10 }}>
+              {ties.length ? `偵測到同分：${ties.map((t) => t.map((g) => `${g.name} ${g.avg}`).join(' = ')).join('；')}` : '目前沒有同分組別；如需加賽仍可手動勾選'}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+              {base.groups.filter((g) => g.count > 0).map((g) => {
+                const sel = (pick || ties[0]?.map((x) => x.id) || []).includes(g.id)
+                return <button key={g.id} className="pill" onClick={() => {
+                  const cur = pick || ties[0]?.map((x) => x.id) || []
+                  setPick(cur.includes(g.id) ? cur.filter((x) => x !== g.id) : [...cur, g.id])
+                }} style={{ background: sel ? g.color : g.soft, color: sel ? '#fff' : 'var(--ink)' }}>{sel ? '✓ ' : ''}{g.name} {g.avg}</button>
+              })}
+            </div>
+            <button onClick={beginTb} style={{ width: '100%', padding: 14, borderRadius: 14, background: '#EF7A6A', color: '#fff', fontWeight: 900, fontSize: 17 }}>⚔️ 開始加賽</button>
+          </div>
+        )}
 
         {q && state !== 'waiting' && state !== 'final' && (
           <div className="card" style={{ padding: 18, marginTop: 14 }}>
-            <div style={{ color: 'var(--muted)', fontWeight: 700, fontSize: 14 }}>第 {qi + 1} / {QUESTIONS.length} 題・{q.cat}{state === 'question' && `・⏱ ${Math.ceil(left)} 秒`}</div>
+            <div style={{ color: 'var(--muted)', fontWeight: 700, fontSize: 14 }}>{tb ? '⚔️ 加賽' : ''}第 {qi + 1} / {QS.length} 題・{q.cat}{state === 'question' && `・⏱ ${Math.ceil(left)} 秒`}</div>
             <div style={{ fontWeight: 800, fontSize: 18, margin: '6px 0 12px' }}>{q.q}</div>
             {q.opts.map((o, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', borderRadius: 12, marginBottom: 6,
@@ -115,7 +152,7 @@ function Console() {
 
         <div className="card" style={{ padding: 16, marginTop: 14 }}>
           <div style={{ fontWeight: 800, marginBottom: 10 }}>本題作答：{Object.keys(row).length} / {plist.length}</div>
-          {GROUPS.map((g) => {
+          {GROUPS.filter((g) => !tb || tbGroups.includes(g.id)).map((g) => {
             const m = plist.filter(([, p]) => p.group === g.id)
             return (
               <div key={g.id} style={{ marginBottom: 10 }}>
@@ -148,12 +185,12 @@ function Console() {
       </>}
 
       {tab === 'people' && <>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8, marginBottom: 12 }}>
           {scores.groups.map((g) => (
             <div key={g.id} className="card" style={{ padding: 12, background: g.soft, textAlign: 'center' }}>
               <div style={{ fontWeight: 800, fontSize: 14 }}>{g.emoji} {g.name}</div>
               <div className="num" style={{ fontSize: 26, fontWeight: 800 }}>{g.avg}</div>
-              <div style={{ fontSize: 12, color: 'var(--body)' }}>{g.count} 人・第 {g.rank} 名</div>
+              <div style={{ fontSize: 12, color: 'var(--body)' }}>{g.count} 人・第 {g.rank} 名{g.tbAvg != null ? `・加賽 ${g.tbAvg}` : ''}</div>
             </div>
           ))}
         </div>

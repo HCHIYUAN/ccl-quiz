@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { push, set, get } from 'firebase/database'
 import { r } from '../firebase'
-import { QUESTIONS, GROUPS, OPTS, TIMER, levelOf } from '../data/questions'
+import { QUESTIONS, GROUPS, OPTS, TIMER, levelOf, isTb, qsetOf, ansKeyOf } from '../data/questions'
 import { computeScores } from '../lib/score'
 import { useQuiz, useCountdown } from '../lib/useQuiz'
 import { Blobs, Confetti, groupOf } from '../lib/ui'
@@ -10,7 +10,7 @@ const LS = 'ccl-quiz-pid'
 const DEMO = new URLSearchParams(window.location.search).get('demo')
 
 export default function PlayerPage() {
-  const { game, players, answers, offset } = useQuiz()
+  const { game, players, answers, tbAnswers, offset } = useQuiz()
   const left = useCountdown(game, offset)
   const [pid, setPid] = useState(() => (DEMO ? (DEMO === 'join' ? '' : 'p1') : localStorage.getItem(LS) || ''))
   const [name, setName] = useState('')
@@ -25,12 +25,16 @@ export default function PlayerPage() {
   }, [pid, players])
 
   const qi = game?.currentQ ?? 0
-  const q = QUESTIONS[qi]
-  const myAns = pid ? answers?.[qi]?.[pid] : null
+  const tb = isTb(game)
+  const QS = qsetOf(game)
+  const q = QS[qi]
+  const rowAll = tb ? tbAnswers : answers
+  const myAns = pid ? rowAll?.[qi]?.[pid] : null
+  const tbGroups = game?.tbGroups || []
   const scores = useMemo(() => {
-    const upto = game?.state === 'question' ? qi - 1 : qi
-    return computeScores(players, answers, upto)
-  }, [players, answers, qi, game?.state])
+    const upto = tb ? QUESTIONS.length - 1 : game?.state === 'question' ? qi - 1 : qi
+    return computeScores(players, answers, upto, tbGroups.length ? { answers: tbAnswers, groups: tbGroups } : null)
+  }, [players, answers, tbAnswers, qi, game?.state, tb, tbGroups.join()])
   const mine = scores.byPlayer[pid]
 
   async function join() {
@@ -46,7 +50,7 @@ export default function PlayerPage() {
   async function answer(i) {
     if (myAns || left <= 0 || game?.state !== 'question') return
     const ms = Math.max(0, Math.round(Date.now() + offset - game.startTime))
-    await set(r(`answers/${qi}/${pid}`), { choice: i, ms })
+    await set(r(`${ansKeyOf(game)}/${qi}/${pid}`), { choice: i, ms })
   }
 
   const shell = (children, bg) => (
@@ -57,6 +61,13 @@ export default function PlayerPage() {
   )
 
   if (game === undefined) return shell(<Center>連線中…</Center>)
+
+  // ── 測驗開始後不開放加入 ──
+  if (!me && game.state !== 'waiting') return shell(<Center>
+    <div style={{ fontSize: 56 }}>🙈</div>
+    <div style={{ fontSize: 22, fontWeight: 800, marginTop: 8 }}>測驗已經開始</div>
+    <div style={{ color: 'var(--body)', marginTop: 8 }}>這一輪不開放加入，請看大螢幕一起參與</div>
+  </Center>)
 
   // ── 加入 ──
   if (!me) return shell(<>
@@ -76,7 +87,7 @@ export default function PlayerPage() {
             style={{ padding: '16px 8px', borderRadius: 18, background: group === g.id ? g.color : g.soft,
               color: group === g.id ? '#fff' : 'var(--ink)', fontWeight: 800, fontSize: 17,
               boxShadow: group === g.id ? `0 6px 16px ${g.color}66` : 'none', transition: 'all .2s' }}>
-            <div style={{ fontSize: 26 }}>{g.emoji}</div>{g.name}<div style={{ fontSize: 13, fontWeight: 500, opacity: .85 }}>{g.nick}</div>
+            <div style={{ fontSize: 26 }}>{g.emoji}</div>{g.name}<div style={{ fontSize: 13, fontWeight: 500, opacity: .85 }}>{g.lead}</div>
           </button>
         ))}
       </div>
@@ -107,13 +118,24 @@ export default function PlayerPage() {
     </Center>
   </>)
 
+  // ── 加賽：非同分組只觀看 ──
+  if (tb && (state === 'question' || state === 'reveal') && !tbGroups.includes(me.group)) return shell(<>
+    {header}
+    <Center>
+      <div className="floaty" style={{ fontSize: 60 }}>⚔️</div>
+      <div style={{ fontSize: 22, fontWeight: 900, marginTop: 8 }}>加賽進行中</div>
+      <div style={{ color: 'var(--body)', marginTop: 8 }}>{tbGroups.map((id) => groupOf(id).name).join(' vs ')}</div>
+      <div style={{ color: 'var(--body)', marginTop: 4 }}>請看大螢幕幫忙加油 📣</div>
+    </Center>
+  </>)
+
   // ── 作答中 ──
   if (state === 'question' && q) {
     const timeUp = left <= 0
     return shell(<>
       {header}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <span className="pill" style={{ background: '#fff' }}>第 {qi + 1} / {QUESTIONS.length} 題</span>
+        <span className="pill" style={{ background: tb ? '#FDE5E1' : '#fff' }}>{tb ? '⚔️ 加賽 ' : ''}第 {qi + 1} / {QS.length} 題</span>
         <span className="pill num" style={{ background: timeUp ? 'var(--bad-soft)' : '#fff', fontSize: 18 }}>⏱ {Math.ceil(left)}</span>
       </div>
       <div style={{ height: 8, background: '#F3EADF', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
@@ -151,11 +173,11 @@ export default function PlayerPage() {
       <Center small>
         <div className="pop" style={{ fontSize: 64 }}>{!myAns ? '😶' : ok ? '🎉' : '💪'}</div>
         <div style={{ fontSize: 24, fontWeight: 900, color: !myAns ? 'var(--body)' : ok ? 'var(--ok)' : 'var(--bad)' }}>
-          {!myAns ? '這題沒有作答' : ok ? '答對了！+10 分' : '可惜，答錯了'}
+          {!myAns ? '這題沒有作答' : ok ? (tb ? '答對了！加賽 +10' : '答對了！+10 分') : '可惜，答錯了'}
         </div>
       </Center>
       <div className="card" style={{ padding: 18, marginTop: 8 }}>
-        <div style={{ color: 'var(--muted)', fontWeight: 700, fontSize: 14 }}>第 {qi + 1} 題・正確答案</div>
+        <div style={{ color: 'var(--muted)', fontWeight: 700, fontSize: 14 }}>{tb ? '加賽' : ''}第 {qi + 1} 題・正確答案</div>
         <div style={{ fontSize: 18, fontWeight: 800, margin: '6px 0 10px', color: 'var(--ok)' }}>{OPTS[q.ans].label}. {q.opts[q.ans]}</div>
         <div style={{ color: 'var(--body)', lineHeight: 1.6 }}>{q.exp}</div>
       </div>
@@ -181,7 +203,7 @@ export default function PlayerPage() {
       </div>
       {gr && <div className="card" style={{ padding: 18, marginTop: 14, textAlign: 'center', background: g.soft }}>
         <div style={{ fontWeight: 800 }}>{g.emoji} {g.name} 平均 <span className="num" style={{ fontSize: 26 }}>{gr.avg}</span> 分</div>
-        <div style={{ color: 'var(--body)', marginTop: 4 }}>小組排名第 {gr.rank} 名</div>
+        <div style={{ color: 'var(--body)', marginTop: 4 }}>小組排名第 {gr.rank} 名{gr.inTb && game.tbDone ? `（加賽平均 ${gr.tbAvg}）` : ''}</div>
       </div>}
     </>)
   }
