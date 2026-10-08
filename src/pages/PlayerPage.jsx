@@ -129,7 +129,7 @@ export default function PlayerPage() {
       <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>CCL 知識小測驗</div>
       <div style={{ color: 'var(--body)', marginTop: 6 }}>歡迎 {me.name}！</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 20 }}>
-        {[['10', '題'], ['20', '秒／題'], ['100', '分滿分']].map(([n, t]) => (
+        {[['10', '題'], [String(TIMER), '秒／題'], ['100', '分滿分']].map(([n, t]) => (
           <div key={t} style={{ background: g.soft, borderRadius: 16, padding: '10px 4px' }}>
             <div className="num" style={{ fontSize: 26, fontWeight: 800 }}>{n}</div><div style={{ fontSize: 13, color: 'var(--body)' }}>{t}</div>
           </div>
