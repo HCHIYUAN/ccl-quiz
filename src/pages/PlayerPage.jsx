@@ -69,35 +69,46 @@ export default function PlayerPage() {
     <div style={{ color: 'var(--body)', marginTop: 8 }}>這一輪不開放加入，請看大螢幕一起參與</div>
   </Center>)
 
-  // ── 加入 ──
-  if (!me) return shell(<>
-    <div style={{ textAlign: 'center', marginTop: 18 }}>
-      <div className="floaty" style={{ fontSize: 56 }}>🧪</div>
-      <h1 style={{ fontSize: 28, fontWeight: 900, margin: '6px 0 4px' }}>CCL 知識小測驗</h1>
-      <div style={{ color: 'var(--body)' }}>10 題 · 每題 10 分 · 滿分 100</div>
+  // ── 加入：先選組別，再輸入姓名 ──
+  if (!me && !group) return shell(<>
+    <div style={{ textAlign: 'center', margin: '8px 0 18px' }}>
+      <div style={{ fontSize: 24, fontWeight: 900 }}>🧪 CCL 知識小測驗</div>
+      <div style={{ color: 'var(--body)', marginTop: 4 }}>請選擇你的部門</div>
     </div>
-    <div className="card" style={{ padding: 22, marginTop: 22 }}>
-      <label style={{ fontWeight: 700 }}>你的名字</label>
-      <input value={name} onChange={(e) => setName(e.target.value)} maxLength={12} placeholder="輸入姓名"
-        style={{ width: '100%', marginTop: 8, padding: '14px 16px', fontSize: 18, borderRadius: 14, border: '2px solid var(--line)', outline: 'none', background: '#FFFCF8' }} />
-      <div style={{ fontWeight: 700, margin: '18px 0 10px' }}>選擇組別</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        {GROUPS.map((g) => (
-          <button key={g.id} onClick={() => setGroup(g.id)}
-            style={{ padding: '16px 8px', borderRadius: 18, background: group === g.id ? g.color : g.soft,
-              color: group === g.id ? '#fff' : 'var(--ink)', fontWeight: 800, fontSize: 17,
-              boxShadow: group === g.id ? `0 6px 16px ${g.color}66` : 'none', transition: 'all .2s' }}>
-            <div style={{ fontSize: 26 }}>{g.emoji}</div>{g.name}<div style={{ fontSize: 13, fontWeight: 500, opacity: .85 }}>{g.lead}</div>
-          </button>
-        ))}
-      </div>
-      <button onClick={join} disabled={!name.trim() || !group || busy}
-        style={{ width: '100%', marginTop: 20, padding: 16, borderRadius: 16, fontSize: 18, fontWeight: 800, color: '#fff',
-          background: name.trim() && group ? 'var(--accent)' : '#CFCBE0' }}>
-        {busy ? '加入中…' : '加入測驗'}
-      </button>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      {GROUPS.map((gg) => (
+        <button key={gg.id} onClick={() => setGroup(gg.id)} className="pop"
+          style={{ aspectRatio: '1 / 1.1', borderRadius: 26, background: gg.soft, border: `3px solid ${gg.color}`, color: 'var(--ink)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, boxShadow: `0 8px 20px ${gg.color}33` }}>
+          <div style={{ fontSize: 46 }}>{gg.emoji}</div>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>{gg.name}</div>
+          <div style={{ fontSize: 13, color: 'var(--body)' }}>{gg.lead}</div>
+        </button>
+      ))}
     </div>
   </>)
+
+  if (!me) {
+    const gg = groupOf(group)
+    return shell(<>
+      <button onClick={() => setGroup(0)} className="pill" style={{ background: '#fff', marginBottom: 14 }}>← 重選部門</button>
+      <div className="card pop" style={{ padding: 24, textAlign: 'center', background: gg.soft, border: `3px solid ${gg.color}` }}>
+        <div style={{ fontSize: 52 }}>{gg.emoji}</div>
+        <div style={{ fontWeight: 900, fontSize: 22 }}>{gg.name}</div>
+      </div>
+      <div className="card" style={{ padding: 22, marginTop: 16 }}>
+        <label style={{ fontWeight: 800, fontSize: 17 }}>輸入你的姓名</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} maxLength={12} placeholder="例如：王小明" autoFocus
+          onKeyDown={(e) => e.key === 'Enter' && join()}
+          style={{ width: '100%', marginTop: 10, padding: '16px', fontSize: 20, borderRadius: 16, border: `2px solid ${gg.color}`, outline: 'none', background: '#FFFCF8' }} />
+        <button onClick={join} disabled={!name.trim() || busy}
+          style={{ width: '100%', marginTop: 16, padding: 18, borderRadius: 16, fontSize: 19, fontWeight: 900, color: '#fff',
+            background: name.trim() ? gg.color : '#CFCBE0' }}>
+          {busy ? '加入中…' : '進入測驗 →'}
+        </button>
+      </div>
+    </>)
+  }
 
   const g = groupOf(me.group)
   const header = (
@@ -108,14 +119,28 @@ export default function PlayerPage() {
   )
   const state = game.state
 
-  // ── 等待開始 ──
+  // ── 測驗封面（等待開始）──
   if (state === 'waiting') return shell(<>
     {header}
-    <Center>
-      <div className="floaty" style={{ fontSize: 64 }}>{g.emoji}</div>
-      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>已加入，等待主持人開始</div>
-      <div style={{ color: 'var(--body)', marginTop: 8 }}>請看大螢幕 👀</div>
-    </Center>
+    <div className="card pop" style={{ padding: '28px 22px', textAlign: 'center', marginTop: 10 }}>
+      <div className="floaty" style={{ fontSize: 64 }}>🧪</div>
+      <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>CCL 知識小測驗</div>
+      <div style={{ color: 'var(--body)', marginTop: 6 }}>歡迎 {me.name}！</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 20 }}>
+        {[['10', '題'], ['20', '秒／題'], ['100', '分滿分']].map(([n, t]) => (
+          <div key={t} style={{ background: g.soft, borderRadius: 16, padding: '10px 4px' }}>
+            <div className="num" style={{ fontSize: 26, fontWeight: 800 }}>{n}</div><div style={{ fontSize: 13, color: 'var(--body)' }}>{t}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ textAlign: 'left', marginTop: 18, display: 'grid', gap: 8 }}>
+        {[['🟢', '第 1–3 題　簡單'], ['🟡', '第 4–7 題　中等'], ['🔴', '第 8–10 題　挑戰'],
+          ['📊', '第 3、7 題後公布階段排名'], ['🏆', '第 10 題後公布總成績'], ['👥', '團體賽比組員平均，個人賽比總分']].map(([e, t]) => (
+          <div key={t} style={{ display: 'flex', gap: 10, alignItems: 'center', color: 'var(--body)', fontSize: 15 }}><span>{e}</span><span>{t}</span></div>
+        ))}
+      </div>
+    </div>
+    <div style={{ textAlign: 'center', marginTop: 18, color: 'var(--body)', fontWeight: 700 }}>等待主持人開始…請看大螢幕 👀</div>
   </>)
 
   // ── 加賽：非同分組只觀看 ──
@@ -165,8 +190,34 @@ export default function PlayerPage() {
     </>)
   }
 
-  // ── 公布答案 / 中場排行 ──
-  if ((state === 'reveal' || state === 'leaderboard') && q) {
+  // ── 階段排名 ──
+  if (state === 'leaderboard') {
+    const gr = scores.groups.find((x) => x.id === me.group)
+    return shell(<>
+      {header}
+      <Center small>
+        <div className="pop" style={{ fontSize: 56 }}>📊</div>
+        <div style={{ fontSize: 22, fontWeight: 900 }}>{qi <= 2 ? '第一階段' : qi <= 6 ? '第二階段' : `第 ${qi + 1} 題後`}排名</div>
+        <div style={{ color: 'var(--body)', marginTop: 4 }}>已完成第 1–{qi + 1} 題</div>
+      </Center>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="card" style={{ padding: 18, textAlign: 'center' }}>
+          <div style={{ color: 'var(--body)', fontWeight: 700 }}>個人賽</div>
+          <div style={{ fontSize: 30, fontWeight: 900, lineHeight: 1.3, whiteSpace: 'nowrap' }}>第 <span className="num" style={{ fontSize: 40 }}>{mine?.rank ?? '-'}</span> 名</div>
+          <div style={{ color: 'var(--body)' }}>{mine?.score ?? 0} 分・共 {scores.ranking.length} 人</div>
+        </div>
+        <div className="card" style={{ padding: 18, textAlign: 'center', background: g.soft }}>
+          <div style={{ color: 'var(--body)', fontWeight: 700 }}>團體賽</div>
+          <div style={{ fontSize: 30, fontWeight: 900, lineHeight: 1.3, whiteSpace: 'nowrap' }}>第 <span className="num" style={{ fontSize: 40 }}>{gr?.rank ?? '-'}</span> 名</div>
+          <div style={{ color: 'var(--body)' }}>平均 {gr?.avg ?? 0} 分</div>
+        </div>
+      </div>
+      <div style={{ textAlign: 'center', color: 'var(--body)', marginTop: 16 }}>完整排名請看大螢幕 👀</div>
+    </>)
+  }
+
+  // ── 公布答案 ──
+  if (state === 'reveal' && q) {
     const ok = myAns && myAns.choice === q.ans
     return shell(<>
       {header}

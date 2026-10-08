@@ -5,6 +5,9 @@ import { computeScores, distribution, tiedSets } from '../lib/score'
 import { useQuiz, useCountdown } from '../lib/useQuiz'
 import { Blobs, Confetti, TimerRing } from '../lib/ui'
 
+const STAGE_OF = (i) => (i < 3 ? '簡單' : i < 7 ? '中等' : '挑戰')
+const STAGE_TITLE = (i) => (i <= 2 ? '第一階段排名（簡單題 1–3）' : i <= 6 ? '第二階段排名（中等題 4–7）' : `第 ${i + 1} 題後排名`)
+
 export default function BoardPage() {
   const { game, players, answers, tbAnswers, offset } = useQuiz()
   const left = useCountdown(game, offset)
@@ -81,37 +84,47 @@ export default function BoardPage() {
     </div>
   )
 
-  // ── 作答中 ──
+  const shownGroups = GROUPS.filter((g) => !tb || tbGroups.includes(g.id))
+
+  // ── 作答中：左 2/3 題目，右 1/3 各組作答進度 ──
   if (state === 'question' && q) return page(
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '2vw' }}>
-        <div style={{ flex: 1 }}>
-          <span className="pill" style={{ background: tb ? '#FDE5E1' : '#fff', fontSize: 'clamp(14px,1.2vw,22px)' }}>{tb ? `⚔️ 加賽 ${qi + 1} / ${QS.length}・${tbTitle}` : `第 ${qi + 1} / ${QS.length} 題・${q.cat}`}</span>
-          <div style={{ fontSize: 'clamp(28px,3.1vw,58px)', fontWeight: 900, lineHeight: 1.3, marginTop: '1.5vh' }}>{q.q}</div>
-        </div>
-        <TimerRing left={left} total={TIMER} size={Math.round(Math.min(window.innerWidth * 0.11, 180))} />
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.6vw', marginTop: '4vh' }}>
-        {q.opts.map((o, i) => (
-          <div key={i} className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.4vw', padding: '2.6vh 1.6vw', background: OPTS[i].soft, border: `3px solid ${OPTS[i].color}66` }}>
-            <span className="num" style={{ flex: '0 0 auto', width: '4.2vw', height: '4.2vw', minWidth: 48, minHeight: 48, borderRadius: 16, background: OPTS[i].color, color: '#fff', display: 'grid', placeItems: 'center', fontSize: 'clamp(24px,2.2vw,40px)' }}>{OPTS[i].label}</span>
-            <span style={{ fontSize: 'clamp(20px,2vw,38px)', fontWeight: 800 }}>{o}</span>
+    <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2.4vw' }}>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.6vw' }}>
+          <div style={{ flex: 1 }}>
+            <span className="pill" style={{ background: tb ? '#FDE5E1' : '#fff', fontSize: 'clamp(14px,1.2vw,22px)' }}>{tb ? `⚔️ 加賽 ${qi + 1} / ${QS.length}・${tbTitle}` : `第 ${qi + 1} / ${QS.length} 題・${STAGE_OF(qi)}`}</span>
+            <div style={{ fontSize: 'clamp(26px,2.7vw,52px)', fontWeight: 900, lineHeight: 1.3, marginTop: '1.5vh' }}>{q.q}</div>
           </div>
-        ))}
-      </div>
-      <div style={{ marginTop: 'auto', paddingTop: '3vh', display: 'flex', gap: '1.2vw', alignItems: 'center' }}>
-        <div style={{ fontWeight: 800, fontSize: 'clamp(16px,1.4vw,26px)', marginRight: 8 }}>
-          已作答 <span className="num">{aCount}</span> / <span className="num">{pCount}</span>
+          <TimerRing left={left} total={TIMER} size={Math.round(Math.min(window.innerWidth * 0.09, 160))} />
         </div>
-        {GROUPS.filter((g) => !tb || tbGroups.includes(g.id)).map((g) => {
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gridAutoRows: '1fr', gap: '1.4vw', marginTop: '4vh', flex: 1, maxHeight: '52vh' }}>
+          {q.opts.map((o, i) => (
+            <div key={i} className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.2vw', padding: '2.6vh 1.4vw', background: OPTS[i].soft, border: `3px solid ${OPTS[i].color}66` }}>
+              <span className="num" style={{ flex: '0 0 auto', width: '3.6vw', height: '3.6vw', minWidth: 44, minHeight: 44, borderRadius: 16, background: OPTS[i].color, color: '#fff', display: 'grid', placeItems: 'center', fontSize: 'clamp(22px,2vw,38px)' }}>{OPTS[i].label}</span>
+              <span style={{ fontSize: 'clamp(20px,2vw,38px)', fontWeight: 800, lineHeight: 1.3 }}>{o}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.6vh' }}>
+        <div className="card" style={{ padding: '1.8vh 1.4vw', textAlign: 'center' }}>
+          <div style={{ color: 'var(--body)', fontWeight: 700, fontSize: 'clamp(14px,1.1vw,20px)' }}>已完成作答</div>
+          <div className="num" style={{ fontSize: 'clamp(34px,3.4vw,64px)', fontWeight: 800, lineHeight: 1.1 }}>{aCount}<span style={{ fontSize: '0.5em', color: 'var(--muted)' }}> / {pCount}</span></div>
+        </div>
+        {shownGroups.map((g) => {
           const m = plist.filter(([, p]) => p.group === g.id)
           const done = m.filter(([id]) => row[id]).length
+          const rest = m.length - done
           return (
-            <div key={g.id} style={{ flex: 1 }}>
-              <div style={{ fontSize: 'clamp(13px,1vw,18px)', fontWeight: 700, marginBottom: 4 }}>{g.emoji} {g.name} {done}/{m.length}</div>
-              <div style={{ height: 12, background: '#fff', borderRadius: 8, overflow: 'hidden' }}>
+            <div key={g.id} className="card" style={{ padding: '1.6vh 1.2vw', background: g.soft, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontWeight: 800, fontSize: 'clamp(15px,1.25vw,24px)' }}>
+                <span>{g.emoji} {g.name}</span>
+                <span className="num" style={{ fontSize: '1.3em' }}>{done}<span style={{ fontSize: '0.7em', color: 'var(--body)' }}> / {m.length}</span></span>
+              </div>
+              <div style={{ height: 12, background: '#fff', borderRadius: 8, overflow: 'hidden', margin: '1vh 0 0.6vh' }}>
                 <div style={{ width: `${m.length ? (done / m.length) * 100 : 0}%`, height: '100%', background: g.color, transition: 'width .4s' }} />
               </div>
+              <div style={{ fontSize: 'clamp(13px,1vw,18px)', color: rest ? 'var(--body)' : 'var(--ok)', fontWeight: 700 }}>{m.length === 0 ? '尚無組員' : rest ? `還有 ${rest} 人未作答` : '✓ 全員完成'}</div>
             </div>
           )
         })}
@@ -122,54 +135,66 @@ export default function BoardPage() {
     </div>
   )
 
-  // ── 公布答案 ──
+  // ── 公布答案：左 答案＋解說，右 各組答對人數 ──
   if (state === 'reveal' && q) {
-    const d = distribution(curAns, qi)
-    const max = Math.max(1, ...d)
-    const okN = d[q.ans]
+    const okN = Object.values(row).filter((a) => a && a.choice === q.ans).length
     return page(
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: '3vw' }}>
-        <div>
-          <span className="pill" style={{ background: tb ? '#FDE5E1' : '#fff', fontSize: 'clamp(14px,1.2vw,22px)' }}>{tb ? `⚔️ 加賽第 ${qi + 1} 題` : `第 ${qi + 1} 題`}・答對率 {aCount ? Math.round((okN / aCount) * 100) : 0}%</span>
-          <div style={{ fontSize: 'clamp(24px,2.4vw,44px)', fontWeight: 900, lineHeight: 1.3, margin: '1.5vh 0 3vh' }}>{q.q}</div>
-          <div style={{ display: 'grid', gap: '1.6vh' }}>
-            {q.opts.map((o, i) => {
-              const ok = i === q.ans
-              return (
-                <div key={i} className={ok ? 'card pop' : 'card'} style={{ padding: '1.6vh 1.4vw', display: 'flex', alignItems: 'center', gap: '1.2vw',
-                  background: ok ? 'var(--ok-soft)' : '#fff', border: ok ? '3px solid var(--ok)' : '3px solid transparent', opacity: ok ? 1 : 0.75 }}>
-                  <span className="num" style={{ width: 46, height: 46, borderRadius: 14, background: ok ? 'var(--ok)' : OPTS[i].color, color: '#fff', display: 'grid', placeItems: 'center', fontSize: 24, flex: '0 0 auto' }}>{ok ? '✓' : OPTS[i].label}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 800, fontSize: 'clamp(16px,1.5vw,28px)' }}>{o}</div>
-                    <div style={{ height: 10, background: '#F3EADF', borderRadius: 8, marginTop: 6, overflow: 'hidden' }}>
-                      <div style={{ width: `${(d[i] / max) * 100}%`, height: '100%', background: ok ? 'var(--ok)' : OPTS[i].color, transition: 'width .6s' }} />
-                    </div>
-                  </div>
-                  <span className="num" style={{ fontSize: 'clamp(18px,1.6vw,30px)', fontWeight: 800, width: '3vw', textAlign: 'right' }}>{d[i]}</span>
-                </div>
-              )
-            })}
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2.4vw' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2.4vh' }}>
+          <div>
+            <span className="pill" style={{ background: tb ? '#FDE5E1' : '#fff', fontSize: 'clamp(14px,1.2vw,22px)' }}>{tb ? `⚔️ 加賽第 ${qi + 1} 題` : `第 ${qi + 1} 題`}・全體答對率 {aCount ? Math.round((okN / aCount) * 100) : 0}%</span>
+            <div style={{ fontSize: 'clamp(22px,2.2vw,40px)', fontWeight: 800, lineHeight: 1.35, marginTop: '1.5vh', color: 'var(--body)' }}>{q.q}</div>
+          </div>
+          <div className="card pop" style={{ padding: '3vh 2vw', background: 'var(--ok-soft)', border: '4px solid var(--ok)', display: 'flex', alignItems: 'center', gap: '1.6vw' }}>
+            <span className="num" style={{ flex: '0 0 auto', width: '5vw', height: '5vw', minWidth: 56, minHeight: 56, borderRadius: 20, background: 'var(--ok)', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 'clamp(28px,2.8vw,52px)' }}>{OPTS[q.ans].label}</span>
+            <div>
+              <div style={{ color: 'var(--ok)', fontWeight: 800, fontSize: 'clamp(14px,1.2vw,22px)' }}>正確答案</div>
+              <div style={{ fontSize: 'clamp(26px,2.8vw,52px)', fontWeight: 900, lineHeight: 1.2 }}>{q.opts[q.ans]}</div>
+            </div>
+          </div>
+          <div className="card" style={{ padding: '2.6vh 2vw', background: '#FFFDF6', flex: 1 }}>
+            <div style={{ fontWeight: 900, fontSize: 'clamp(16px,1.4vw,26px)', marginBottom: 8 }}>💡 為什麼</div>
+            <div style={{ fontSize: 'clamp(18px,1.6vw,30px)', lineHeight: 1.6, color: 'var(--body)' }}>{q.exp}</div>
           </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2vh' }}>
-          <div className="card" style={{ padding: '2.4vh 1.6vw', background: '#FFFDF6' }}>
-            <div style={{ fontWeight: 900, fontSize: 'clamp(16px,1.4vw,26px)', marginBottom: 8 }}>💡 解說</div>
-            <div style={{ fontSize: 'clamp(16px,1.35vw,26px)', lineHeight: 1.6, color: 'var(--body)' }}>{q.exp}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.6vh' }}>
+          <div className="card" style={{ padding: '1.8vh 1.4vw', textAlign: 'center' }}>
+            <div style={{ color: 'var(--body)', fontWeight: 700, fontSize: 'clamp(14px,1.1vw,20px)' }}>全體答對</div>
+            <div className="num" style={{ fontSize: 'clamp(34px,3.4vw,64px)', fontWeight: 800, lineHeight: 1.1, color: 'var(--ok)' }}>{okN}<span style={{ fontSize: '0.5em', color: 'var(--muted)' }}> / {pCount}</span></div>
           </div>
-          {tb ? <TbBars groups={scores.groups.filter((g) => g.inTb)} /> : <GroupBars groups={scores.groups} compact />}
+          {shownGroups.map((g) => {
+            const m = plist.filter(([, p]) => p.group === g.id)
+            const ok = m.filter(([id]) => row[id] && row[id].choice === q.ans).length
+            return (
+              <div key={g.id} className="card" style={{ padding: '1.6vh 1.2vw', background: g.soft, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontWeight: 800, fontSize: 'clamp(15px,1.25vw,24px)' }}>
+                  <span>{g.emoji} {g.name}</span>
+                  <span className="num" style={{ fontSize: '1.3em' }}>{ok}<span style={{ fontSize: '0.7em', color: 'var(--body)' }}> / {m.length}</span></span>
+                </div>
+                <div style={{ height: 12, background: '#fff', borderRadius: 8, overflow: 'hidden', marginTop: '1vh' }}>
+                  <div style={{ width: `${m.length ? (ok / m.length) * 100 : 0}%`, height: '100%', background: g.color, transition: 'width .6s' }} />
+                </div>
+                <div style={{ fontSize: 'clamp(13px,1vw,18px)', color: 'var(--body)', fontWeight: 700, marginTop: '0.6vh' }}>答對率 {m.length ? Math.round((ok / m.length) * 100) : 0}%</div>
+              </div>
+            )
+          })}
         </div>
       </div>
     )
   }
 
-  // ── 中場排行 ──
+  // ── 階段排名（第 3、7 題後）──
   if (state === 'leaderboard') return page(
-    <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: '3vw' }}>
-      <div>
-        <div style={{ fontSize: 'clamp(28px,3vw,54px)', fontWeight: 900, marginBottom: '3vh' }}>📊 第 {qi + 1} 題後・小組平均</div>
-        <GroupBars groups={scores.groups} />
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ fontSize: 'clamp(28px,3vw,54px)', fontWeight: 900 }}>📊 {STAGE_TITLE(qi)}</div>
+      <div style={{ color: 'var(--body)', fontSize: 'clamp(15px,1.3vw,24px)', margin: '0.6vh 0 2.6vh' }}>已完成第 1–{qi + 1} 題・滿分 {(qi + 1) * 10} 分</div>
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: '3vw' }}>
+        <div>
+          <div style={{ fontWeight: 900, fontSize: 'clamp(18px,1.6vw,30px)', marginBottom: '1.4vh' }}>👥 團體賽（組員平均）</div>
+          <GroupBars groups={scores.groups} max={(qi + 1) * 10} ranked />
+        </div>
+        <TopList ranking={scores.ranking} n={8} title="個人賽前 8 名" />
       </div>
-      <TopList ranking={scores.ranking} n={8} title="個人前 8 名" />
     </div>
   )
 
@@ -226,16 +251,17 @@ export default function BoardPage() {
   return page(<div>請稍候…</div>)
 }
 
-function GroupBars({ groups, compact }) {
+function GroupBars({ groups, compact, max = 100, ranked }) {
   const gs = groups.filter((g) => g.count > 0)
   return (
     <div className="card" style={{ padding: compact ? '2vh 1.6vw' : '3vh 2vw' }}>
       {compact && <div style={{ fontWeight: 900, fontSize: 'clamp(16px,1.4vw,26px)', marginBottom: 10 }}>📊 小組平均</div>}
       {gs.map((g) => (
         <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: '1vw', margin: compact ? '1.2vh 0' : '2.4vh 0' }}>
+          {ranked && <span style={{ fontSize: 'clamp(22px,2vw,36px)', width: '3vw' }}>{['🥇', '🥈', '🥉', '🎖️'][g.rank - 1]}</span>}
           <div style={{ width: compact ? '11vw' : '14vw', fontWeight: 800, fontSize: compact ? 'clamp(14px,1.2vw,22px)' : 'clamp(18px,1.6vw,30px)' }}>{g.emoji} {g.name}</div>
           <div style={{ flex: 1, height: compact ? 22 : 40, background: '#F6EFE6', borderRadius: 14, overflow: 'hidden' }}>
-            <div style={{ width: `${g.avg}%`, height: '100%', background: g.color, borderRadius: 14, transition: 'width .8s' }} />
+            <div style={{ width: `${(g.avg / max) * 100}%`, height: '100%', background: g.color, borderRadius: 14, transition: 'width .8s' }} />
           </div>
           <div className="num" style={{ width: '5vw', textAlign: 'right', fontWeight: 800, fontSize: compact ? 'clamp(18px,1.5vw,28px)' : 'clamp(24px,2.2vw,42px)' }}>{g.avg}</div>
         </div>

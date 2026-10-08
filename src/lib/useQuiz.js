@@ -9,7 +9,7 @@ function demoData(state) {
   const names = ['王小明', '陳怡君', '林志豪', '張雅婷', '李建宏', '黃淑芬', '吳承恩', '劉佳穎', '蔡宗翰', '鄭雅文', '許志明', '周家豪', '謝佩珊', '郭俊傑', '洪詩涵', '曾柏翰']
   const players = {}
   names.forEach((n, i) => { players['p' + i] = { name: n, group: (i % 4) + 1, joinedAt: i } })
-  const qi = state === 'final' ? 9 : 3
+  const qi = state === 'final' ? 9 : state === 'leaderboard' ? 2 : 3
   const answers = {}
   for (let q = 0; q <= qi; q++) {
     answers[q] = {}

@@ -6,6 +6,7 @@ import { computeScores, distribution, tiedSets } from '../lib/score'
 import { useQuiz, useCountdown } from '../lib/useQuiz'
 
 const LS = 'ccl-quiz-host'
+const STAGES = [2, 6] // 第 3、7 題公布後顯示階段排名
 
 export default function HostPage() {
   const [authed, setAuthed] = useState(() => localStorage.getItem(LS) === HOST_PIN)
@@ -93,10 +94,11 @@ function Console() {
   else if (tb && state === 'reveal') main = isLast ? { t: '🏆 公布加賽後最終成績', f: finishTb, c: 'var(--accent)' } : { t: `⚔️ 加賽下一題（第 ${qi + 2} 題）`, f: () => startTb(qi + 1, tbGroups), c: '#EF7A6A' }
   else if (state === 'waiting') main = { t: `▶ 開始第 1 題（${plist.length} 人）`, f: () => startQ(0), c: 'var(--ok)' }
   else if (state === 'question') main = { t: left > 0 ? `📣 提前公布答案（剩 ${Math.ceil(left)} 秒）` : '📣 公布答案', f: reveal, c: left > 0 ? '#F2B632' : 'var(--ok)' }
+  else if (state === 'reveal' && STAGES.includes(qi)) main = { t: `📊 公布${qi === 2 ? '第一' : '第二'}階段排名（個人＋團體）`, f: board, c: 'var(--accent)' }
   else if (state === 'reveal') main = isLast ? { t: '🏆 公布最終成績', f: final, c: 'var(--accent)' } : { t: `▶ 下一題（第 ${qi + 2} 題）`, f: () => startQ(qi + 1), c: 'var(--ok)' }
   else if (state === 'leaderboard') main = isLast ? { t: '🏆 公布最終成績', f: final, c: 'var(--accent)' } : { t: `▶ 下一題（第 ${qi + 2} 題）`, f: () => startQ(qi + 1), c: 'var(--ok)' }
 
-  const label = tb ? `⚔️ 加賽第 ${qi + 1} 題${state === 'question' ? '作答中' : '已公布'}` : { waiting: '⏳ 等待加入', question: `🟢 第 ${qi + 1} 題作答中`, reveal: `📣 第 ${qi + 1} 題已公布`, leaderboard: `📊 第 ${qi + 1} 題後排行`, final: '🏆 最終成績' }[state]
+  const label = tb ? `⚔️ 加賽第 ${qi + 1} 題${state === 'question' ? '作答中' : '已公布'}` : { waiting: '⏳ 等待加入', question: `🟢 第 ${qi + 1} 題作答中`, reveal: `📣 第 ${qi + 1} 題已公布`, leaderboard: `📊 第 ${qi + 1} 題後階段排名`, final: '🏆 最終成績' }[state]
   const d = distribution(curAns, qi)
 
   return (
@@ -115,7 +117,7 @@ function Console() {
 
       {tab === 'control' && <>
         {main && <button onClick={main.f} style={{ width: '100%', padding: '20px 16px', borderRadius: 20, background: main.c, color: '#fff', fontWeight: 900, fontSize: 20, boxShadow: '0 6px 18px rgba(0,0,0,.12)' }}>{main.t}</button>}
-        {(state === 'reveal' && !tb) && <button onClick={board} style={{ width: '100%', marginTop: 10, padding: 14, borderRadius: 16, background: '#fff', fontWeight: 800, fontSize: 16 }}>📊 大螢幕顯示小組排行</button>}
+        {(state === 'reveal' && !tb && !STAGES.includes(qi) && !isLast) && <button onClick={board} style={{ width: '100%', marginTop: 10, padding: 14, borderRadius: 16, background: '#fff', fontWeight: 800, fontSize: 16 }}>📊 大螢幕顯示小組排行</button>}
         {state === 'final' && <div className="card" style={{ padding: 16, textAlign: 'center', fontWeight: 800 }}>測驗結束 🎉 可到「個人成績」匯出 CSV</div>}
         {state === 'final' && !game.tbDone && (
           <div className="card" style={{ padding: 16, marginTop: 12, background: ties.length ? '#FFF1EE' : '#fff' }}>
